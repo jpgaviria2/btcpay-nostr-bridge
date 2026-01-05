@@ -1,0 +1,34 @@
+[Unit]
+Description=BTCPay to Nostr Bridge Service
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=btcpay
+Group=btcpay
+WorkingDirectory=/home/btcpay/btcpay-nostr-bridge
+Environment="PATH=/home/btcpay/btcpay-nostr-bridge/venv/bin:/usr/local/bin:/usr/bin:/bin"
+
+# Run the service
+ExecStart=/home/btcpay/btcpay-nostr-bridge/venv/bin/python3 /home/btcpay/btcpay-nostr-bridge/service.py
+
+# Restart policy
+Restart=always
+RestartSec=10
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/btcpay/btcpay-nostr-bridge
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=btcpay-nostr-bridge
+
+[Install]
+WantedBy=multi-user.target
+

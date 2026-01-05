@@ -1,0 +1,97 @@
+╔═══════════════════════════════════════════════════════════════╗
+║           BTCPay to Nostr Bridge - Quick Start                ║
+╠═══════════════════════════════════════════════════════════════╣
+║                                                               ║
+║  ✅ Service implementation is COMPLETE                        ║
+║  🟡 Needs 3 quick configuration steps to start               ║
+║                                                               ║
+╠═══════════════════════════════════════════════════════════════╣
+║  STEP 1: Add Nostr Private Key                               ║
+╠═══════════════════════════════════════════════════════════════╣
+║                                                               ║
+║  nano /home/btcpay/btcpay-nostr-bridge/.env                  ║
+║                                                               ║
+║  Find line: NOSTR_PRIVATE_KEY=YOUR_PRIVATE_KEY_HERE          ║
+║  Replace with your actual nsec key                           ║
+║                                                               ║
+╠═══════════════════════════════════════════════════════════════╣
+║  STEP 2: Configure BTCPay Webhook                            ║
+╠═══════════════════════════════════════════════════════════════╣
+║                                                               ║
+║  1. Go to: https://anmore.cash                               ║
+║  2. Store Settings → Webhooks → Create Webhook               ║
+║                                                               ║
+║     Payload URL: https://anmore.cash/btcpay-webhook          ║
+║     Events:      ☑ InvoiceSettled                            ║
+║     Secret:      Click "Generate" and copy it                ║
+║     Content:     application/json                            ║
+║                                                               ║
+║  3. Add secret to .env file:                                 ║
+║     BTCPAY_WEBHOOK_SECRET=<paste_secret_here>                ║
+║                                                               ║
+╠═══════════════════════════════════════════════════════════════╣
+║  STEP 3: Start the Service                                   ║
+╠═══════════════════════════════════════════════════════════════╣
+║                                                               ║
+║  sudo systemctl enable btcpay-nostr-bridge                   ║
+║  sudo systemctl start btcpay-nostr-bridge                    ║
+║  sudo systemctl status btcpay-nostr-bridge                   ║
+║                                                               ║
+║  Watch logs:                                                 ║
+║  sudo journalctl -u btcpay-nostr-bridge -f                   ║
+║                                                               ║
+╠═══════════════════════════════════════════════════════════════╣
+║  TESTING                                                     ║
+╠═══════════════════════════════════════════════════════════════╣
+║                                                               ║
+║  1. Create test invoice in BTCPay                            ║
+║  2. Pay the invoice                                          ║
+║  3. Watch logs for success message                           ║
+║  4. Check https://trailscoffee.com/fundraiser.html           ║
+║     Progress bar should update automatically!                ║
+║                                                               ║
+╠═══════════════════════════════════════════════════════════════╣
+║  USEFUL COMMANDS                                             ║
+╠═══════════════════════════════════════════════════════════════╣
+║                                                               ║
+║  View logs:                                                  ║
+║    sudo journalctl -u btcpay-nostr-bridge -f                 ║
+║                                                               ║
+║  Check status:                                               ║
+║    sudo systemctl status btcpay-nostr-bridge                 ║
+║                                                               ║
+║  Restart service:                                            ║
+║    sudo systemctl restart btcpay-nostr-bridge                ║
+║                                                               ║
+║  Test endpoint:                                              ║
+║    curl http://localhost:8765/health                         ║
+║    curl https://anmore.cash/btcpay-webhook                   ║
+║                                                               ║
+╠═══════════════════════════════════════════════════════════════╣
+║  DOCUMENTATION                                               ║
+╠═══════════════════════════════════════════════════════════════╣
+║                                                               ║
+║  📖 Full Setup Guide:                                        ║
+║     cat SETUP_INSTRUCTIONS.md                                ║
+║                                                               ║
+║  📖 Complete Documentation:                                  ║
+║     cat README.md                                            ║
+║                                                               ║
+║  📖 Implementation Summary:                                  ║
+║     cat IMPLEMENTATION_COMPLETE.md                           ║
+║                                                               ║
+╠═══════════════════════════════════════════════════════════════╣
+║  CONFIGURED FOR                                              ║
+╠═══════════════════════════════════════════════════════════════╣
+║                                                               ║
+║  Campaign:  Trails Coffee PAC Fundraiser                     ║
+║  Lightning: pac@anmore.cash                                  ║
+║  Goal:      100,000 sats                                     ║
+║  Relay:     wss://relay.anmore.me                            ║
+║  Webhook:   https://anmore.cash/btcpay-webhook               ║
+║                                                               ║
+╚═══════════════════════════════════════════════════════════════╝
+
+Time to Complete: ~5 minutes
+Difficulty: Easy (copy/paste configuration)
+
