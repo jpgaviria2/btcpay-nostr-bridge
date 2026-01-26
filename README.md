@@ -1,150 +1,183 @@
-# BTCPay to Nostr Bridge Service
+# BTCPay to Nostr Bridge
 
-A lightweight service that bridges BTCPay Server invoice settlements to Nostr events, enabling real-time fundraising updates on your website.
+A service that automatically publishes NIP-57 compliant zap receipts to Nostr when BTCPay Server invoices are settled. Supports dynamic multi-campaign fundraising with lightning addresses.
 
-## Overview
+## Features
 
-This service:
-- Listens for BTCPay Server webhook notifications
-- Validates webhook signatures for security
-- Creates Nostr zap receipt events (kind 9735)
-- Publishes events to relay.anmore.me
-- Enables real-time donation tracking on your fundraising page
+- 🔄 **Dynamic Campaign Discovery**: Automatically loads fundraising campaigns (kind 9041 events) from your Nostr relay
+- ⚡ **Lightning Address Routing**: Routes donations to the correct campaign based on the lightning address used
+- 📡 **NIP-57 Compliant**: Creates properly signed zap receipts with embedded zap requests
+- 🔒 **Secure**: Webhook signature verification, all secrets in environment variables
+- 🔁 **Production Ready**: Systemd service with auto-restart, duplicate detection, proper logging
 
-## Architecture
+## How It Works
 
-```
-Donor → BTCPay Server → Webhook → This Service → Nostr Relay → Website
-```
+1. User donates to a lightning address (e.g., `campaign@yourdomain.com`)
+2. BTCPay Server creates invoice with the lightning address in metadata
+3. When payment settles, BTCPay sends webhook to this service
+4. Service:
+   - Validates webhook signature
+   - Fetches full invoice details from BTCPay API
+   - Extracts lightning address from payment method data
+   - Looks up corresponding campaign from Nostr relay
+   - Creates NIP-57 zap receipt with proper signatures
+   - Publishes to Nostr relay using nak CLI
 
-## Prerequisites
+## Requirements
 
-- Python 3.12 or higher
-- BTCPay Server with webhook access
-- Nostr private key (nsec format)
-- Existing fundraising campaign (kind 9041 event) on relay.anmore.me
-- Caddy web server (for proxying webhook URL)
+- Python 3.8+
+- BTCPay Server with API access
+- Nostr relay
+- `nak` CLI tool installed
+- Systemd (for service management)
 
 ## Installation
 
-### 1. Install System Dependencies
+### 1. Clone Repository
 
 ```bash
-sudo apt update
-sudo apt install -y python3-pip python3-venv
+cd ~
+git clone https://github.com/yourusername/btcpay-nostr-bridge.git
+cd btcpay-nostr-bridge
 ```
 
-### 2. Create Virtual Environment
+### 2. Run Installation Script
 
 ```bash
-cd /home/btcpay/btcpay-nostr-bridge
-python3 -m venv venv
-source venv/bin/activate
+sudo bash install.sh
 ```
 
-### 3. Install Python Dependencies
+This installs:
+- Python virtual environment
+- Required Python packages
+- System dependencies
+
+### 3. Install nak CLI
 
 ```bash
-pip install -r requirements.txt
+# Download and install nak
+cd /tmp
+wget https://github.com/fiatjaf/nak/releases/download/v0.7.5/nak-v0.7.5-linux-amd64
+sudo mv nak-v0.7.5-linux-amd64 /usr/local/bin/nak
+sudo chmod +x /usr/local/bin/nak
 ```
 
-### 4. Find Your Campaign Details
-
-Run the campaign query script to find your fundraising campaign:
+### 4. Configure Environment
 
 ```bash
-python3 setup_query_campaign.py
-```
-
-This will output the `CAMPAIGN_EVENT_ID` and `CAMPAIGN_CREATOR_PUBKEY` values you need.
-
-### 5. Configure Environment
-
-Copy the example environment file:
-
-```bash
+cd ~/btcpay-nostr-bridge
 cp .env.example .env
-chmod 600 .env  # Secure the file
-```
-
-Edit `.env` and fill in all required values:
-
-```bash
 nano .env
 ```
 
-Required variables:
-- `NOSTR_PRIVATE_KEY`: Your Nostr private key (nsec format)
-- `CAMPAIGN_EVENT_ID`: From step 4
-- `CAMPAIGN_CREATOR_PUBKEY`: From step 4
-- `BTCPAY_WEBHOOK_SECRET`: Get this from BTCPay (step 7)
-
-### 6. Configure Caddy Reverse Proxy
-
-Add this to your Caddy configuration (`/etc/caddy/Caddyfile`):
-
-```caddy
-anmore.cash {
-    # BTCPay webhook endpoint
-    handle /btcpay-webhook {
-        reverse_proxy localhost:8765
-    }
-    
-    # ... your other configuration ...
-}
-```
-
-Reload Caddy:
+Fill in all required values:
 
 ```bash
-sudo systemctl reload caddy
+# Nostr Configuration
+NOSTR_PRIVATE_KEY=nsec1... or hex_private_key
+NOSTR_RELAY_URL=wss://your-relay.com
+
+# Campaign Configuration
+CAMPAIGN_REFRESH_INTERVAL=300  # seconds (5 minutes)
+
+# BTCPay Configuration
+BTCPAY_WEBHOOK_SECRET=your_webhook_secret_here
+BTCPAY_SERVER_URL=https://your-btcpay-server.com
+BTCPAY_API_KEY=your_api_key_here
+
+# Service Configuration
+WEBHOOK_PORT=8765
+WEBHOOK_HOST=0.0.0.0
+DEBUG=false
 ```
 
-### 7. Set Up BTCPay Webhook
-
-1. Log into BTCPay Server
-2. Go to Store Settings → Webhooks
-3. Click "Create Webhook"
-4. Configure:
-   - **Payload URL**: `https://anmore.cash/btcpay-webhook`
-   - **Events**: Check "InvoiceSettled"
-   - **Secret**: Click "Generate" and copy the value
-   - **Content Type**: `application/json`
-5. Save webhook
-6. Add the secret to your `.env` file as `BTCPAY_WEBHOOK_SECRET`
-
-### 8. Install Systemd Service
-
-Copy the service file:
+### 5. Setup Systemd Service
 
 ```bash
+# Copy and customize the service template
+cp btcpay-nostr-bridge.service.template btcpay-nostr-bridge.service
+nano btcpay-nostr-bridge.service
+
+# Update these values:
+# - User=YOUR_USERNAME
+# - Group=YOUR_USERNAME
+# - WorkingDirectory=/path/to/btcpay-nostr-bridge
+# - Update all paths to match your installation
+
+# Install the service
 sudo cp btcpay-nostr-bridge.service /etc/systemd/system/
 sudo systemctl daemon-reload
-```
-
-Enable and start the service:
-
-```bash
 sudo systemctl enable btcpay-nostr-bridge
 sudo systemctl start btcpay-nostr-bridge
 ```
 
-Check status:
+### 6. Configure BTCPay Server
+
+#### Create API Key
+
+Your API key needs the `btcpay.store.canviewinvoices` permission:
+
+1. Log into BTCPay Server
+2. Go to Account → Manage Account → API Keys
+3. Create new API key with permission: `btcpay.store.canviewinvoices:YOUR_STORE_ID`
+4. Copy the key to your `.env` file
+
+#### Configure Webhook
+
+1. In BTCPay Server, go to your store → Settings → Webhooks
+2. Add webhook:
+   - **Payload URL**: `https://your-domain.com/btcpay-webhook`
+   - **Secret**: Generate a random secret and add to `.env`
+   - **Events**: Select "Invoice Settled" (InvoiceSettled)
+   - **Automatic redelivery**: Enabled (optional)
+
+#### Configure Reverse Proxy
+
+If BTCPay is in Docker, you need to proxy the webhook URL:
+
+```nginx
+# Example Caddy config
+handle /btcpay-webhook {
+    reverse_proxy localhost:8765
+}
+```
+
+### 7. Create Fundraising Campaigns
+
+Publish kind 9041 fundraising events to your Nostr relay with these tags:
+
+```json
+{
+  "kind": 9041,
+  "content": "Campaign description",
+  "tags": [
+    ["title", "Your Campaign Name"],
+    ["summary", "Short description"],
+    ["image", "https://..."],
+    ["amount", "1000000", "sats"],
+    ["zap", "campaign@yourdomain.com"]
+  ]
+}
+```
+
+The service will automatically discover campaigns from your relay every 5 minutes.
+
+## Usage
+
+### Check Service Status
 
 ```bash
 sudo systemctl status btcpay-nostr-bridge
 ```
 
-## Usage
-
 ### View Logs
 
 ```bash
-# Real-time logs
+# Live logs
 sudo journalctl -u btcpay-nostr-bridge -f
 
-# Last 50 lines
-sudo journalctl -u btcpay-nostr-bridge -n 50
+# Recent logs
+sudo journalctl -u btcpay-nostr-bridge -n 100
 ```
 
 ### Restart Service
@@ -153,127 +186,74 @@ sudo journalctl -u btcpay-nostr-bridge -n 50
 sudo systemctl restart btcpay-nostr-bridge
 ```
 
-### Stop Service
+### Test Payment Flow
 
-```bash
-sudo systemctl stop btcpay-nostr-bridge
+1. Create invoice with lightning address in BTCPay
+2. Pay the invoice
+3. Check logs to see the zap receipt publication
+4. Query your relay for kind 9735 events
+
+## Project Structure
+
+```
+btcpay-nostr-bridge/
+├── service.py              # Main Flask webhook server
+├── config.py               # Configuration management
+├── btcpay_client.py        # BTCPay API client
+├── nostr_client.py         # Nostr event creation & publishing
+├── campaign_manager.py     # Dynamic campaign discovery
+├── requirements.txt        # Python dependencies
+├── install.sh              # Installation script
+├── .env.example            # Environment template
+├── .gitignore             # Git ignore rules
+└── btcpay-nostr-bridge.service.template  # Systemd service template
 ```
 
-### Test Health Endpoint
+## Security
 
-```bash
-curl http://localhost:8765/health
-```
-
-### Test Webhook Manually
-
-You can send a test webhook from BTCPay Server:
-
-1. Go to Store Settings → Webhooks
-2. Click on your webhook
-3. Click "Recent Deliveries"
-4. Create a test invoice and mark it as paid
-5. Watch the logs: `sudo journalctl -u btcpay-nostr-bridge -f`
-
-## Monitoring
-
-### Service Health
-
-```bash
-systemctl status btcpay-nostr-bridge
-```
-
-### View Recent Donations
-
-Query the relay for recent zap receipts:
-
-```bash
-# If you have nak installed
-nak req -k 9735 wss://relay.anmore.me --limit 10
-
-# Or use the Python script
-python3 -c "import asyncio; from nostr_client import NostrClient; asyncio.run(NostrClient().connect())"
-```
-
-### Website Updates
-
-Visit your fundraising page and watch donations appear in real-time:
-- https://trailscoffee.com/fundraiser.html
+- ✅ All secrets stored in `.env` file (not in git)
+- ✅ Webhook signature verification (HMAC-SHA256)
+- ✅ Systemd security hardening enabled
+- ✅ Read-only file system access
+- ✅ No new privileges allowed
 
 ## Troubleshooting
 
-### Service Won't Start
+### Service won't start
 
-Check configuration:
 ```bash
-cd /home/btcpay/btcpay-nostr-bridge
+# Check logs for errors
+sudo journalctl -u btcpay-nostr-bridge -n 50
+
+# Validate configuration
+cd ~/btcpay-nostr-bridge
 source venv/bin/activate
-python3 service.py
+python3 -c "from config import Config; Config.validate()"
 ```
 
-This will show any configuration errors.
+### Webhooks not received
 
-### Webhooks Not Received
+- Check reverse proxy configuration
+- Verify webhook URL is accessible from BTCPay
+- Check BTCPay webhook delivery logs
+- Verify webhook secret matches in both places
 
-1. Check Caddy is proxying correctly:
-   ```bash
-   curl https://anmore.cash/btcpay-webhook
-   ```
+### Events not publishing to relay
 
-2. Check BTCPay webhook deliveries in dashboard
+- Check nak is installed: `which nak`
+- Test nak manually: `echo '{"kind":1,"content":"test"}' | nak event wss://your-relay.com`
+- Check relay URL in `.env`
+- Check relay accepts your events
 
-3. Verify webhook secret matches
+### Duplicate events
 
-### Events Not Publishing
+- Ensure BTCPay webhook is configured for "InvoiceSettled" only
+- Check service logs for "already processed" messages
 
-1. Check Nostr relay is accessible:
-   ```bash
-   curl -I https://relay.anmore.me
-   ```
+## Contributing
 
-2. Verify private key is correct
-
-3. Check campaign event ID exists on relay
-
-### Permission Issues
-
-Ensure service file has correct user:
-```bash
-sudo nano /etc/systemd/system/btcpay-nostr-bridge.service
-# User should be: btcpay
-```
-
-## Security Considerations
-
-- `.env` file contains sensitive keys (chmod 600)
-- Service listens only on localhost (not exposed to internet)
-- Caddy provides TLS/HTTPS termination
-- Webhook signatures are verified
-- No authentication tokens stored in logs
-
-## File Structure
-
-```
-/home/btcpay/btcpay-nostr-bridge/
-├── service.py                    # Main webhook listener
-├── nostr_client.py               # Nostr event creation & publishing
-├── config.py                     # Configuration management
-├── requirements.txt              # Python dependencies
-├── .env                          # Configuration (create from .env.example)
-├── .env.example                  # Configuration template
-├── setup_query_campaign.py       # Helper to find campaign details
-├── btcpay-nostr-bridge.service   # Systemd service file
-└── README.md                     # This file
-```
-
-## Support
-
-- Check logs: `journalctl -u btcpay-nostr-bridge -f`
-- Verify configuration: Check `.env` file
-- Test webhook: Use BTCPay's webhook test feature
-- Contact: hello@trailscoffee.com
+Issues and pull requests welcome!
 
 ## License
 
-MIT License - Feel free to use and modify for your needs.
-
+MIT License - see LICENSE file for details

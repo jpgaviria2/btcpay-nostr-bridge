@@ -12,20 +12,19 @@ class Config:
     
     # Nostr Configuration
     NOSTR_PRIVATE_KEY = os.getenv('NOSTR_PRIVATE_KEY', '')
-    NOSTR_RELAY_URL = os.getenv('NOSTR_RELAY_URL', 'wss://relay.anmore.me')
+    NOSTR_RELAY_URL = os.getenv('NOSTR_RELAY_URL', '')
     
-    # Campaign Configuration
-    CAMPAIGN_EVENT_ID = os.getenv('CAMPAIGN_EVENT_ID', '')
-    CAMPAIGN_CREATOR_PUBKEY = os.getenv('CAMPAIGN_CREATOR_PUBKEY', '')
+    # Campaign Configuration (Dynamic - loaded from relay)
+    CAMPAIGN_REFRESH_INTERVAL = int(os.getenv('CAMPAIGN_REFRESH_INTERVAL', '300'))  # 5 minutes
     
     # BTCPay Configuration
     BTCPAY_WEBHOOK_SECRET = os.getenv('BTCPAY_WEBHOOK_SECRET', '')
-    BTCPAY_SERVER_URL = os.getenv('BTCPAY_SERVER_URL', 'https://anmore.cash')
+    BTCPAY_SERVER_URL = os.getenv('BTCPAY_SERVER_URL', '')
     BTCPAY_API_KEY = os.getenv('BTCPAY_API_KEY', '')  # Optional - for fetching invoice details
     
     # Service Configuration
     WEBHOOK_PORT = int(os.getenv('WEBHOOK_PORT', '8765'))
-    WEBHOOK_HOST = os.getenv('WEBHOOK_HOST', '127.0.0.1')  # Localhost only
+    WEBHOOK_HOST = os.getenv('WEBHOOK_HOST', '0.0.0.0')  # Listen on all interfaces (for Docker access)
     DEBUG = os.getenv('DEBUG', 'false').lower() == 'true'
     
     @classmethod
@@ -36,14 +35,14 @@ class Config:
         if not cls.NOSTR_PRIVATE_KEY:
             errors.append("NOSTR_PRIVATE_KEY is required")
         
-        if not cls.CAMPAIGN_EVENT_ID:
-            errors.append("CAMPAIGN_EVENT_ID is required")
-        
-        if not cls.CAMPAIGN_CREATOR_PUBKEY:
-            errors.append("CAMPAIGN_CREATOR_PUBKEY is required")
+        if not cls.NOSTR_RELAY_URL:
+            errors.append("NOSTR_RELAY_URL is required")
         
         if not cls.BTCPAY_WEBHOOK_SECRET:
             errors.append("BTCPAY_WEBHOOK_SECRET is required")
+        
+        if not cls.BTCPAY_SERVER_URL:
+            errors.append("BTCPAY_SERVER_URL is required")
         
         if errors:
             raise ValueError(f"Configuration errors: {', '.join(errors)}")
@@ -57,8 +56,8 @@ class Config:
         print("BTCPay to Nostr Bridge - Configuration")
         print("=" * 80)
         print(f"Nostr Relay: {cls.NOSTR_RELAY_URL}")
-        print(f"Campaign Event ID: {cls.CAMPAIGN_EVENT_ID[:16]}..." if cls.CAMPAIGN_EVENT_ID else "Campaign Event ID: NOT SET")
-        print(f"Campaign Creator: {cls.CAMPAIGN_CREATOR_PUBKEY[:16]}..." if cls.CAMPAIGN_CREATOR_PUBKEY else "Campaign Creator: NOT SET")
+        print(f"Campaign Mode: DYNAMIC (loaded from relay)")
+        print(f"Campaign Refresh: {cls.CAMPAIGN_REFRESH_INTERVAL}s")
         print(f"Private Key: {'SET' if cls.NOSTR_PRIVATE_KEY else 'NOT SET'}")
         print(f"Webhook Secret: {'SET' if cls.BTCPAY_WEBHOOK_SECRET else 'NOT SET'}")
         print(f"Webhook Port: {cls.WEBHOOK_PORT}")

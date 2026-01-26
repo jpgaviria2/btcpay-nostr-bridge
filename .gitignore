@@ -3,6 +3,9 @@
 *.key
 *.pem
 
+# Customized service file (contains user-specific paths)
+btcpay-nostr-bridge.service
+
 # Python
 __pycache__/
 *.py[cod]

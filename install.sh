@@ -33,8 +33,9 @@ sudo -u $ACTUAL_USER bash -c "source venv/bin/activate && pip install -r require
 
 echo ""
 echo "Configuring systemd service..."
-cp btcpay-nostr-bridge.service /etc/systemd/system/
-systemctl daemon-reload
+# Don't copy yet - user needs to customize first
+# cp btcpay-nostr-bridge.service /etc/systemd/system/
+# systemctl daemon-reload
 
 echo ""
 echo "=========================================="
@@ -43,19 +44,22 @@ echo "=========================================="
 echo ""
 echo "Next steps:"
 echo ""
-echo "1. Find your campaign details:"
+echo "1. Configure environment:"
 echo "   cd $SERVICE_DIR"
-echo "   source venv/bin/activate"
-echo "   python3 setup_query_campaign.py"
-echo ""
-echo "2. Configure environment:"
 echo "   cp .env.example .env"
 echo "   nano .env"
 echo "   # Fill in all required values"
 echo ""
-echo "3. Start the service:"
-echo "   systemctl enable btcpay-nostr-bridge"
-echo "   systemctl start btcpay-nostr-bridge"
+echo "2. Update service file with your paths:"
+echo "   cp btcpay-nostr-bridge.service.template btcpay-nostr-bridge.service"
+echo "   nano btcpay-nostr-bridge.service"
+echo "   # Update USER, GROUP, and WorkingDirectory paths"
+echo ""
+echo "3. Install and start the service:"
+echo "   sudo cp btcpay-nostr-bridge.service /etc/systemd/system/"
+echo "   sudo systemctl daemon-reload"
+echo "   sudo systemctl enable btcpay-nostr-bridge"
+echo "   sudo systemctl start btcpay-nostr-bridge"
 echo ""
 echo "4. Check status:"
 echo "   systemctl status btcpay-nostr-bridge"

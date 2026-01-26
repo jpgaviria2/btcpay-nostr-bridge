@@ -12,6 +12,9 @@ class NostrClient:
     def __init__(self):
         """Initialize Nostr client with private key"""
         try:
+            # Store relay URL
+            self.relay_url = Config.NOSTR_RELAY_URL
+            
             # Load keys from private key (nsec or hex format)
             if Config.NOSTR_PRIVATE_KEY.startswith('nsec'):
                 self.keys = Keys.parse(Config.NOSTR_PRIVATE_KEY)
@@ -49,12 +52,15 @@ class NostrClient:
             print(f"[Nostr] Error connecting: {e}")
             raise
     
-    async def create_zap_receipt(self, amount_sats, invoice_id=None, bolt11=None, preimage=None):
+    async def create_zap_receipt(self, amount_sats, campaign_event_id, campaign_pubkey, 
+                                 invoice_id=None, bolt11=None, preimage=None):
         """
         Create a kind 9735 zap receipt event
         
         Args:
             amount_sats: Amount in satoshis
+            campaign_event_id: Fundraising campaign event ID (kind 9041)
+            campaign_pubkey: Campaign creator's public key
             invoice_id: BTCPay invoice ID (optional)
             bolt11: Lightning invoice (optional)
             preimage: Payment preimage (optional)
@@ -70,30 +76,63 @@ class NostrClient:
             tags = []
             
             # Link to fundraising campaign event
-            tags.append(Tag.parse(["e", Config.CAMPAIGN_EVENT_ID]))
+            tags.append(Tag.parse(["e", campaign_event_id]))
             
             # Link to campaign creator
-            tags.append(Tag.parse(["p", Config.CAMPAIGN_CREATOR_PUBKEY]))
+            tags.append(Tag.parse(["p", campaign_pubkey]))
             
             # Amount in millisatoshis
             tags.append(Tag.parse(["amount", str(amount_msats)]))
             
-            # Optional: Add bolt11 invoice
+            # REQUIRED: Add bolt11 invoice (NIP-57 requirement)
             if bolt11:
                 tags.append(Tag.parse(["bolt11", bolt11]))
+            else:
+                print("[Nostr] WARNING: bolt11 is required for NIP-57 zap receipts")
             
             # Optional: Add payment preimage as proof
             if preimage:
                 tags.append(Tag.parse(["preimage", preimage]))
             
-            # Optional: Add description with BTCPay invoice ID
-            description_parts = []
-            if invoice_id:
-                description_parts.append(f"BTCPay Invoice: {invoice_id}")
-            if amount_sats:
-                description_parts.append(f"{amount_sats} sats donated")
+            # Create a proper signed zap request event for the description tag (NIP-57)
+            import json
+            zap_request_tags = [
+                Tag.parse(["e", campaign_event_id]),
+                Tag.parse(["p", campaign_pubkey]),
+                Tag.parse(["amount", str(amount_msats)])
+            ]
             
-            content = " | ".join(description_parts) if description_parts else ""
+            # Build and sign the zap request (kind 9734)
+            zap_request_builder = EventBuilder(Kind(9734), f"Donation of {amount_sats} sats").tags(zap_request_tags)
+            zap_request_event = await zap_request_builder.sign(self.signer)
+            
+            # Serialize the signed event to JSON for the description tag  
+            # Convert tags to list format
+            tags_list = []
+            for tag in zap_request_event.tags().to_vec():
+                tags_list.append(tag.as_vec())
+            
+            zap_request_json = {
+                "id": zap_request_event.id().to_hex(),
+                "pubkey": zap_request_event.author().to_hex(),
+                "created_at": zap_request_event.created_at().as_secs(),
+                "kind": zap_request_event.kind().as_u16(),
+                "tags": tags_list,
+                "content": zap_request_event.content(),
+                "sig": zap_request_event.signature()
+            }
+            
+            # Add description tag with properly signed zap request
+            tags.append(Tag.parse(["description", json.dumps(zap_request_json)]))
+            
+            # Content can describe the payment
+            content_parts = []
+            if invoice_id:
+                content_parts.append(f"BTCPay Invoice: {invoice_id}")
+            if amount_sats:
+                content_parts.append(f"{amount_sats} sats donated")
+            
+            content = " | ".join(content_parts) if content_parts else ""
             
             # Build event
             event_builder = EventBuilder(Kind(9735), content).tags(tags)
@@ -102,8 +141,8 @@ class NostrClient:
             print(f"[Nostr] Created zap receipt event:")
             print(f"  Event ID: {event.id().to_hex()}")
             print(f"  Amount: {amount_sats} sats ({amount_msats} msats)")
-            print(f"  Campaign: {Config.CAMPAIGN_EVENT_ID[:16]}...")
-            print(f"  Creator: {Config.CAMPAIGN_CREATOR_PUBKEY[:16]}...")
+            print(f"  Campaign: {campaign_event_id[:16]}...")
+            print(f"  Creator: {campaign_pubkey[:16]}...")
             
             return event
             
@@ -113,7 +152,7 @@ class NostrClient:
     
     async def publish_event(self, event):
         """
-        Publish event to Nostr relay
+        Publish event to Nostr relay using nak CLI
 
         Args:
             event: Event object to publish
@@ -122,26 +161,75 @@ class NostrClient:
             bool: True if published successfully
         """
         import logging
+        import subprocess
+        import json
+        from config import Config
+        
         logger = logging.getLogger(__name__)
 
         try:
-            logger.debug(f"Sending event to relay...")
-            result = await self.client.send_event(event)
-            logger.info(f"✅ Published event: {result.id.to_hex()}")
-            logger.debug(f"Success relays: {len(result.success)}, Failed relays: {len(result.failed)}")
-            return True
+            logger.debug(f"Preparing event for nak CLI...")
+            
+            # Convert event to JSON
+            tags_list = []
+            for tag in event.tags().to_vec():
+                tags_list.append(tag.as_vec())
+            
+            event_json = {
+                "id": event.id().to_hex(),
+                "pubkey": event.author().to_hex(),
+                "created_at": event.created_at().as_secs(),
+                "kind": event.kind().as_u16(),
+                "tags": tags_list,
+                "content": event.content(),
+                "sig": event.signature()
+            }
+            
+            event_str = json.dumps(event_json)
+            
+            # Use nak to publish the pre-signed event by piping it via stdin
+            cmd = ['nak', 'event', self.relay_url]
+            
+            logger.debug(f"Publishing event {event_json['id'][:16]}... to {self.relay_url}")
+            
+            result = subprocess.run(
+                cmd,
+                input=event_str,
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            output = result.stdout + result.stderr
+            logger.debug(f"nak output: {output}")
+            
+            if result.returncode == 0 and 'success' in output.lower():
+                logger.info(f"✅ Published event: {event_json['id'][:16]}...")
+                return True
+            else:
+                logger.error(f"❌ Event NOT published")
+                logger.error(f"   Event ID: {event_json['id'][:16]}...")
+                logger.error(f"   nak output: {output}")
+                return False
+                
+        except subprocess.TimeoutExpired:
+            logger.error(f"❌ Timeout publishing event with nak")
+            return False
         except Exception as e:
             logger.error(f"❌ Error publishing event: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             return False
     
-    async def publish_donation(self, amount_sats, invoice_id=None, bolt11=None, preimage=None):
+    async def publish_donation(self, amount_sats, campaign_event_id, campaign_pubkey, 
+                              invoice_id=None, bolt11=None, preimage=None):
         """
         Create and publish a zap receipt for a donation
 
         Args:
             amount_sats: Amount in satoshis
+            campaign_event_id: Fundraising campaign event ID (kind 9041)
+            campaign_pubkey: Campaign creator's public key
             invoice_id: BTCPay invoice ID (optional)
             bolt11: Lightning invoice (optional)
             preimage: Payment preimage (optional)
@@ -157,6 +245,8 @@ class NostrClient:
             # Create zap receipt event
             event = await self.create_zap_receipt(
                 amount_sats=amount_sats,
+                campaign_event_id=campaign_event_id,
+                campaign_pubkey=campaign_pubkey,
                 invoice_id=invoice_id,
                 bolt11=bolt11,
                 preimage=preimage
