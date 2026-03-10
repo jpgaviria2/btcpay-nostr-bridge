@@ -260,28 +260,30 @@ def handle_btcpay_webhook():
         
         logger.info(f"✅ Lightning address: {lightning_address}")
         
-        # Lookup campaign by lightning address
+        # Lookup campaign by lightning address (optional - nice to have but not required)
         logger.info(f"🔍 Looking up campaign for {lightning_address}...")
         campaign = campaign_manager.get_campaign_by_lightning_address(lightning_address)
         
-        if not campaign:
-            logger.warning(f"❌ No campaign found for lightning address: {lightning_address}")
-            logger.warning("   Make sure a kind 9041 event exists with this lightning address")
-            logger.warning("   Available campaigns:")
-            for ln_addr in campaign_manager.get_all_campaigns().keys():
-                logger.warning(f"     - {ln_addr}")
-            return jsonify({'error': f'No campaign found for {lightning_address}'}), 404
+        campaign_event_id = None
+        campaign_pubkey = None
         
-        logger.info(f"✅ Found campaign: {campaign.title}")
-        logger.info(f"   Campaign ID: {campaign.event_id[:16]}...")
-        logger.info(f"   Creator: {campaign.pubkey[:16]}...")
+        if campaign:
+            logger.info(f"✅ Found campaign: {campaign.title}")
+            logger.info(f"   Campaign ID: {campaign.event_id[:16]}...")
+            logger.info(f"   Creator: {campaign.pubkey[:16]}...")
+            campaign_event_id = campaign.event_id
+            campaign_pubkey = campaign.pubkey
+        else:
+            logger.warning(f"⚠️  No campaign found for {lightning_address}, will publish basic receipt")
+            logger.info("   Zap receipt will still be posted with lightning address for UI aggregation")
 
-        # Publish to Nostr (async operation)
-        logger.info("📡 Publishing to Nostr...")
+        # Publish to Nostr (async operation) - always publish, campaign data is optional
+        logger.info("📡 Publishing zap receipt to Nostr...")
         success = asyncio.run(nostr_client.publish_donation(
             amount_sats=invoice_data['amount_sats'],
-            campaign_event_id=campaign.event_id,
-            campaign_pubkey=campaign.pubkey,
+            lightning_address=lightning_address,
+            campaign_event_id=campaign_event_id,
+            campaign_pubkey=campaign_pubkey,
             invoice_id=invoice_data['invoice_id'],
             bolt11=invoice_data['bolt11'],
             preimage=invoice_data['preimage']

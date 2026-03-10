@@ -8,13 +8,13 @@ from config import Config
 
 class NostrClient:
     """Handles Nostr event creation and publishing"""
-    
+
     def __init__(self):
         """Initialize Nostr client with private key"""
         try:
             # Store relay URL
             self.relay_url = Config.NOSTR_RELAY_URL
-            
+
             # Load keys from private key (nsec or hex format)
             if Config.NOSTR_PRIVATE_KEY.startswith('nsec'):
                 self.keys = Keys.parse(Config.NOSTR_PRIVATE_KEY)
@@ -32,11 +32,11 @@ class NostrClient:
             self.client = Client(self.signer)
 
             print(f"[Nostr] Client initialized with signer")
-            
+
         except Exception as e:
             print(f"[Nostr] Error initializing client: {e}")
             raise
-    
+
     async def connect(self):
         """Connect to Nostr relays"""
         try:
@@ -51,12 +51,12 @@ class NostrClient:
         except Exception as e:
             print(f"[Nostr] Error connecting: {e}")
             raise
-    
-    async def create_zap_receipt(self, amount_sats, campaign_event_id, campaign_pubkey, 
-                                 invoice_id=None, bolt11=None, preimage=None):
+
+    async def create_zap_receipt(self, amount_sats, campaign_event_id, campaign_pubkey,
+                                 lightning_address=None, invoice_id=None, bolt11=None, preimage=None):
         """
         Create a kind 9735 zap receipt event
-        
+
         Args:
             amount_sats: Amount in satoshis
             campaign_event_id: Fundraising campaign event ID (kind 9041)
@@ -64,43 +64,55 @@ class NostrClient:
             invoice_id: BTCPay invoice ID (optional)
             bolt11: Lightning invoice (optional)
             preimage: Payment preimage (optional)
-        
+
         Returns:
             Event object
         """
         try:
             # Convert sats to millisats
             amount_msats = amount_sats * 1000
-            
+
             # Build tags
             tags = []
-            
-            # Link to fundraising campaign event
-            tags.append(Tag.parse(["e", campaign_event_id]))
-            
-            # Link to campaign creator
-            tags.append(Tag.parse(["p", campaign_pubkey]))
-            
-            # Amount in millisatoshis
+
+            # REQUIRED: Lightning address for UI aggregation
+            if lightning_address:
+                tags.append(Tag.parse(["lnurl", lightning_address]))
+
+            # Amount in millisatoshis (REQUIRED)
             tags.append(Tag.parse(["amount", str(amount_msats)]))
-            
+
+            # OPTIONAL: Link to fundraising campaign event if known
+            if campaign_event_id:
+                tags.append(Tag.parse(["e", campaign_event_id]))
+
+            # OPTIONAL: Link to campaign creator if known
+            if campaign_pubkey:
+                tags.append(Tag.parse(["p", campaign_pubkey]))
+
             # REQUIRED: Add bolt11 invoice (NIP-57 requirement)
             if bolt11:
                 tags.append(Tag.parse(["bolt11", bolt11]))
             else:
                 print("[Nostr] WARNING: bolt11 is required for NIP-57 zap receipts")
-            
+
             # Optional: Add payment preimage as proof
             if preimage:
                 tags.append(Tag.parse(["preimage", preimage]))
-            
+
             # Create a proper signed zap request event for the description tag (NIP-57)
+            # This is optional but recommended for better compatibility
             import json
-            zap_request_tags = [
-                Tag.parse(["e", campaign_event_id]),
-                Tag.parse(["p", campaign_pubkey]),
-                Tag.parse(["amount", str(amount_msats)])
-            ]
+            zap_request_tags = []
+            
+            # Add campaign tags if available
+            if campaign_event_id:
+                zap_request_tags.append(Tag.parse(["e", campaign_event_id]))
+            if campaign_pubkey:
+                zap_request_tags.append(Tag.parse(["p", campaign_pubkey]))
+            
+            # Always include amount
+            zap_request_tags.append(Tag.parse(["amount", str(amount_msats)]))
             
             # Build and sign the zap request (kind 9734)
             zap_request_builder = EventBuilder(Kind(9734), f"Donation of {amount_sats} sats").tags(zap_request_tags)
@@ -124,32 +136,35 @@ class NostrClient:
             
             # Add description tag with properly signed zap request
             tags.append(Tag.parse(["description", json.dumps(zap_request_json)]))
-            
+
             # Content can describe the payment
             content_parts = []
             if invoice_id:
                 content_parts.append(f"BTCPay Invoice: {invoice_id}")
             if amount_sats:
                 content_parts.append(f"{amount_sats} sats donated")
-            
+
             content = " | ".join(content_parts) if content_parts else ""
-            
+
             # Build event
             event_builder = EventBuilder(Kind(9735), content).tags(tags)
             event = await event_builder.sign(self.signer)
-            
+
             print(f"[Nostr] Created zap receipt event:")
             print(f"  Event ID: {event.id().to_hex()}")
             print(f"  Amount: {amount_sats} sats ({amount_msats} msats)")
-            print(f"  Campaign: {campaign_event_id[:16]}...")
-            print(f"  Creator: {campaign_pubkey[:16]}...")
-            
+            print(f"  Lightning Address: {lightning_address or 'unknown'}")
+            if campaign_event_id:
+                print(f"  Campaign: {campaign_event_id[:16]}...")
+            if campaign_pubkey:
+                print(f"  Creator: {campaign_pubkey[:16]}...")
+
             return event
-            
+
         except Exception as e:
             print(f"[Nostr] Error creating event: {e}")
             raise
-    
+
     async def publish_event(self, event):
         """
         Publish event to Nostr relay using nak CLI
@@ -164,17 +179,17 @@ class NostrClient:
         import subprocess
         import json
         from config import Config
-        
+
         logger = logging.getLogger(__name__)
 
         try:
             logger.debug(f"Preparing event for nak CLI...")
-            
+
             # Convert event to JSON
             tags_list = []
             for tag in event.tags().to_vec():
                 tags_list.append(tag.as_vec())
-            
+
             event_json = {
                 "id": event.id().to_hex(),
                 "pubkey": event.author().to_hex(),
@@ -184,14 +199,14 @@ class NostrClient:
                 "content": event.content(),
                 "sig": event.signature()
             }
-            
+
             event_str = json.dumps(event_json)
-            
+
             # Use nak to publish the pre-signed event by piping it via stdin
             cmd = ['nak', 'event', self.relay_url]
-            
+
             logger.debug(f"Publishing event {event_json['id'][:16]}... to {self.relay_url}")
-            
+
             result = subprocess.run(
                 cmd,
                 input=event_str,
@@ -199,10 +214,10 @@ class NostrClient:
                 text=True,
                 timeout=30
             )
-            
+
             output = result.stdout + result.stderr
             logger.debug(f"nak output: {output}")
-            
+
             if result.returncode == 0 and 'success' in output.lower():
                 logger.info(f"✅ Published event: {event_json['id'][:16]}...")
                 return True
@@ -211,7 +226,7 @@ class NostrClient:
                 logger.error(f"   Event ID: {event_json['id'][:16]}...")
                 logger.error(f"   nak output: {output}")
                 return False
-                
+
         except subprocess.TimeoutExpired:
             logger.error(f"❌ Timeout publishing event with nak")
             return False
@@ -220,16 +235,17 @@ class NostrClient:
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             return False
-    
-    async def publish_donation(self, amount_sats, campaign_event_id, campaign_pubkey, 
-                              invoice_id=None, bolt11=None, preimage=None):
+
+    async def publish_donation(self, amount_sats, lightning_address, campaign_event_id=None, 
+                              campaign_pubkey=None, invoice_id=None, bolt11=None, preimage=None):
         """
         Create and publish a zap receipt for a donation
 
         Args:
-            amount_sats: Amount in satoshis
-            campaign_event_id: Fundraising campaign event ID (kind 9041)
-            campaign_pubkey: Campaign creator's public key
+            amount_sats: Amount in satoshis (REQUIRED)
+            lightning_address: Lightning address that was paid (REQUIRED)
+            campaign_event_id: Fundraising campaign event ID (kind 9041) - optional
+            campaign_pubkey: Campaign creator's public key - optional
             invoice_id: BTCPay invoice ID (optional)
             bolt11: Lightning invoice (optional)
             preimage: Payment preimage (optional)
@@ -241,10 +257,11 @@ class NostrClient:
         logger = logging.getLogger(__name__)
 
         try:
-            logger.info(f"Creating zap receipt for {amount_sats} sats")
+            logger.info(f"Creating zap receipt for {amount_sats} sats to {lightning_address}")
             # Create zap receipt event
             event = await self.create_zap_receipt(
                 amount_sats=amount_sats,
+                lightning_address=lightning_address,
                 campaign_event_id=campaign_event_id,
                 campaign_pubkey=campaign_pubkey,
                 invoice_id=invoice_id,
@@ -268,7 +285,7 @@ class NostrClient:
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             return False
-    
+
     async def close(self):
         """Close connections"""
         try:
