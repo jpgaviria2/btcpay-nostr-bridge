@@ -1,5 +1,5 @@
 flask==3.0.0
-python-dotenv==1.0.0
+python-dotenv==1.2.2
 nostr-sdk==0.44.0
 requests==2.31.0
 websockets==12.0
